@@ -1,0 +1,145 @@
+# .cursorrules — GigLao Project
+# วางไฟล์นี้ไว้ที่ root ของ Flutter project
+
+## Project Overview
+GigLao is a freelance marketplace mobile app for Laos, similar to Fastwork/Fiverr.
+Built with Flutter (iOS + Android + Web) and Supabase as the backend.
+
+## Tech Stack
+- **Frontend**: Flutter 3.x (Dart)
+- **Backend**: Supabase (PostgreSQL + Auth + Storage + Realtime)
+- **State Management**: Riverpod (flutter_riverpod)
+- **Navigation**: go_router
+- **HTTP/API**: Supabase Flutter SDK only (no dio/http package needed)
+- **UI**: Material 3 design system
+
+## Key Packages (pubspec.yaml)
+```yaml
+dependencies:
+  supabase_flutter: ^2.x
+  flutter_riverpod: ^2.x
+  go_router: ^13.x
+  cached_network_image: ^3.x
+  image_picker: ^1.x
+  firebase_messaging: ^14.x       # push notifications
+  intl: ^0.19.x                   # date/number formatting
+  timeago: ^3.x
+  flutter_chat_ui: ^1.x           # chat UI component
+  pinput: ^3.x                    # OTP input
+```
+
+## Code Conventions
+
+### File Naming
+- snake_case for all files: `service_card.dart`, `auth_provider.dart`
+- Screens end with `_screen.dart`
+- Widgets end with `_widget.dart` or descriptive name
+- Providers end with `_provider.dart`
+- Models end with `.dart` (just the model name)
+
+### Dart Style
+- Always use `const` constructors where possible
+- Prefer `final` over `var`
+- Use named parameters for functions with 2+ parameters
+- Always handle null safety properly (no `!` unless absolutely certain)
+
+### Supabase Patterns
+```dart
+// ✅ Correct: always use try/catch
+Future<List<Service>> getServices() async {
+  try {
+    final response = await supabase
+      .from('services')
+      .select('*, profiles(*), categories(*)')
+      .eq('is_active', true)
+      .order('created_at', ascending: false);
+    return response.map((e) => Service.fromJson(e)).toList();
+  } catch (e) {
+    throw Exception('Failed to load services: $e');
+  }
+}
+
+// ✅ Realtime subscription pattern
+StreamSubscription? _sub;
+_sub = supabase
+  .from('messages')
+  .stream(primaryKey: ['id'])
+  .eq('conversation_id', conversationId)
+  .listen((data) { ... });
+// Always cancel in dispose()
+```
+
+### Riverpod Patterns
+```dart
+// Use AsyncNotifierProvider for data that loads from Supabase
+class ServicesNotifier extends AsyncNotifier<List<Service>> {
+  @override
+  Future<List<Service>> build() async {
+    return ref.read(serviceRepositoryProvider).getServices();
+  }
+}
+
+final servicesProvider = AsyncNotifierProvider<ServicesNotifier, List<Service>>(
+  ServicesNotifier.new,
+);
+```
+
+### Currency Formatting
+- Always display prices in LAK (Lao Kip)
+- Use `NumberFormat('#,###', 'en_US').format(price)` + ' ກີບ'
+- Example: `1,500,000 ກີບ`
+
+## Language / Localization
+- **Primary language**: ລາວ (Lao)
+- **Secondary**: English (for technical terms)
+- Every user-facing string must have a Lao version
+- Use `app_strings_lo.dart` for all Lao text
+- Font: **Noto Sans Lao** (add to assets/fonts/)
+- Always set `fontFamily: 'NotoSansLao'` in ThemeData
+
+## Supabase Configuration
+```dart
+// core/constants/app_config.dart
+class AppConfig {
+  static const supabaseUrl = 'YOUR_SUPABASE_URL';
+  static const supabaseAnonKey = 'YOUR_SUPABASE_ANON_KEY';
+}
+
+// main.dart
+await Supabase.initialize(
+  url: AppConfig.supabaseUrl,
+  anonKey: AppConfig.supabaseAnonKey,
+);
+```
+
+## Database Tables (reference)
+- `profiles` — user accounts (extends auth.users)
+- `categories` — service categories (has `name_lo` for Lao)
+- `services` — freelancer gigs (has `title_lo`, `description_lo`)
+- `orders` — jobs placed by clients (escrow-based)
+- `payments` — payment records (BCEL One integration)
+- `conversations` + `messages` — real-time chat
+- `reviews` — ratings after order completion
+- `notifications` — in-app notifications
+
+## Business Logic Rules
+1. **Commission**: Platform takes 15% of every order
+   - `platform_fee = price * 0.15`
+   - `freelancer_earnings = price * 0.85`
+2. **Escrow**: Payment is HELD in `payments` table until order status = 'completed'
+3. **Order Flow**: pending → in_progress → delivered → completed (or revision/disputed)
+4. **Review**: Can only be left after order status = 'completed'
+
+## Error Handling
+- Always show errors in Lao language to users
+- Log errors to console in English for debugging
+- Use `ScaffoldMessenger.of(context).showSnackBar()` for user feedback
+- Never show raw Supabase errors to users
+
+## What NOT to do
+- ❌ Don't use `setState` in complex screens — use Riverpod
+- ❌ Don't call Supabase directly from widgets — use providers/repositories
+- ❌ Don't hardcode strings in widgets — use app_strings_lo.dart
+- ❌ Don't skip null checks
+- ❌ Don't use `http` or `dio` package — Supabase SDK handles everything
+- ❌ Don't store sensitive data in SharedPreferences — Supabase handles auth tokens
