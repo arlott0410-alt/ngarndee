@@ -7,6 +7,14 @@ import { createSupabaseBrowserClient } from "@/lib/supabase-client";
 
 type UserRole = "client" | "freelancer";
 
+/** ສ້າງ username ທີ່ບໍ່ຊ້ຳ ສຳລັບຄອລຳທີ່ອາດຈຳເປັນ NOT NULL ໃນ profiles */
+function buildUniqueUsername(email: string, userId: string) {
+  const local = (email.split("@")[0] ?? "user").replace(/[^a-zA-Z0-9_]/g, "_").toLowerCase();
+  const base = local.replace(/_+/g, "_").replace(/^_|_$/g, "") || "user";
+  const suffix = userId.replace(/-/g, "").slice(0, 12);
+  return `${base}_${suffix}`.slice(0, 50);
+}
+
 export default function RegisterPage() {
   const router = useRouter();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
@@ -33,6 +41,12 @@ export default function RegisterPage() {
     const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: {
+          full_name: fullName,
+          role,
+        },
+      },
     });
 
     if (signUpError || !signUpData.user) {
@@ -41,15 +55,46 @@ export default function RegisterPage() {
       return;
     }
 
-    const { error: profileError } = await supabase.from("profiles").upsert({
-      id: signUpData.user.id,
-      full_name: fullName,
-      full_name_lo: fullName,
-      role,
-    });
+    /* ຖ້າ Supabase ຕັ້ງໃຫ້ຕ້ອງຢືນຢັນອີເມລ ກ່ອນ — ຈະບໍ່ມີ session ແລະ RLS ອາດບລັອກ insert ໂປຣໄຟລ໌ */
+    if (!signUpData.session) {
+      setErrorMessage(
+        "ກະລຸນາກວດອີເມລ ແລະ ກົດລິ້ງຢືນຢັນບັນຊີກ່ອນ. ຫຼັງຢືນຢັນແລ້ວ ຈຶ່ງເຂົ້າສູ່ລະບົບໄດ້. ຖ້າບໍ່ເຫັນອີເມລ ກວດຖັງຂີ້ເຫຍື່ອ.",
+      );
+      setIsSubmitting(false);
+      return;
+    }
+
+    const username = buildUniqueUsername(email, signUpData.user.id);
+
+    const { error: profileError } = await supabase.from("profiles").upsert(
+      {
+        id: signUpData.user.id,
+        username,
+        full_name: fullName,
+        full_name_lo: fullName,
+        role,
+        is_verified: false,
+        rating_avg: 0,
+        rating_count: 0,
+        completed_orders: 0,
+      },
+      { onConflict: "id" },
+    );
 
     if (profileError) {
-      setErrorMessage("ສ້າງໂປຣໄຟລບໍ່ສໍາເລັດ, ກະລຸນາລອງໃໝ່");
+      console.error("[register] profiles upsert:", profileError.message, profileError);
+      const msg = profileError.message?.toLowerCase() ?? "";
+      if (msg.includes("row-level security") || msg.includes("policy")) {
+        setErrorMessage(
+          "ບໍ່ສາມາດບັນທຶກໂປຣໄຟລ໌ໄດ້ (ສິດການເຂົ້າເຖິງຖານຂໍ້ມູນ). ກະລຸນາຕິດຕໍ່ຜູ້ດູແລລະບົບ.",
+        );
+      } else if (msg.includes("duplicate") || msg.includes("unique")) {
+        setErrorMessage("ຊື່ຜູ້ໃຊ້ ຫຼື ອີເມລນີ້ຖືກໃຊ້ແລ້ວ, ກະລຸນາລອງໃໝ່.");
+      } else {
+        setErrorMessage(
+          "ສ້າງໂປຣໄຟລບໍ່ສໍາເລັດ. ກະລຸນາລອງໃໝ່ ຫຼື ກວດການຕັ້ງຄ່າໂຕຕາຕະລາງ profiles ໃນ Supabase.",
+        );
+      }
       setIsSubmitting(false);
       return;
     }
